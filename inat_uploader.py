@@ -10,10 +10,22 @@ _token: str | None = None
 
 
 def get_token() -> str:
+    """Return a valid iNaturalist API token.
+
+    Prefers INAT_API_TOKEN (the JWT from inaturalist.org/users/edit → Applications)
+    so no OAuth2 app registration is needed.  Falls back to the full OAuth2 flow
+    using INAT_APP_ID / INAT_APP_SECRET / INAT_USERNAME / INAT_PASSWORD if the
+    direct token is not set.
+    """
     global _token
     if _token:
         return _token
-    _token = pyinaturalist.get_access_token()
+    import os
+    direct = os.environ.get("INAT_API_TOKEN", "").strip()
+    if direct:
+        _token = direct
+    else:
+        _token = pyinaturalist.get_access_token()
     return _token
 
 

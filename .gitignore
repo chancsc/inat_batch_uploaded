@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pt
+*.onnx
+cropped_output/
+output/
+*.egg-info/
+dist/
+.venv/
+venv/

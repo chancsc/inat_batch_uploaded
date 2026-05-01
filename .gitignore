@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.py[cod]
+*.pt
+*.pth
+cropped_output/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/

@@ -1,0 +1,10 @@
+pyinaturalist>=0.20.0
+ultralytics>=8.0.0
+Pillow>=10.0.0
+piexif>=1.1.3
+geopy>=2.4.0
+python-dotenv>=1.0.0
+click>=8.1.0
+rich>=13.0.0
+textual>=0.50.0
+requests>=2.31.0

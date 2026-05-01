@@ -1,11 +1,12 @@
 .env
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
 *.pt
-*.pth
+*.onnx
 cropped_output/
+output/
 *.egg-info/
 dist/
-build/
 .venv/
 venv/

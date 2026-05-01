@@ -60,8 +60,24 @@ class PreviewApp(App):
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
         table.cursor_type = "row"
-        table.add_columns("☑", "File", "Date/Time", "Detection conf.", "Notes")
+        table.add_columns("☑", "File", "Date/Time", "Det.", "Species (CV suggestion)", "Notes")
         self._refresh_table()
+
+    @staticmethod
+    def _format_species(species: dict | None) -> str:
+        if not species:
+            return "[unknown]"
+        parts = []
+        if species.get("common_name"):
+            parts.append(species["common_name"])
+        if species.get("name"):
+            parts.append(f'({species["name"]})')
+        score = species.get("score", 0.0)
+        parts.append(f'cv:{score:.2f}')
+        label = " ".join(parts)
+        if species.get("low_confidence"):
+            return f"{label} ⚠"
+        return label
 
     def _refresh_table(self) -> None:
         table = self.query_one(DataTable)
@@ -72,9 +88,10 @@ class PreviewApp(App):
             dt: datetime = record["datetime"]
             dt_str = dt.strftime("%Y-%m-%d %H:%M") if dt else "[no datetime]"
             conf = record.get("confidence")
-            conf_str = f"{conf:.2f}" if conf is not None else "none"
-            notes = "full image (no detection)" if record.get("fallback") else ""
-            table.add_row(check, fname, dt_str, conf_str, notes, key=str(i))
+            conf_str = f"{conf:.2f}" if conf is not None else "—"
+            species_str = self._format_species(record.get("species"))
+            notes = "no detection (full img)" if record.get("fallback") else ""
+            table.add_row(check, fname, dt_str, conf_str, species_str, notes, key=str(i))
         self._update_title()
 
     def _update_title(self) -> None:

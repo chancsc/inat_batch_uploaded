@@ -79,15 +79,13 @@ def _retry_upload(cropped_path: Path, payload: dict, access_token: str, max_atte
 def upload_batch(
     records: list[dict],
     access_token: str,
-    lat: float,
-    lon: float,
-    cv_threshold: float = 0.60,
     tags: list[str] | None = None,
     description: str = "",
     dry_run: bool = False,
 ) -> list[dict]:
+    # Species and taxon_id are pre-computed before this call (in upload_observations.py)
+    # so each record already carries record["species"] with a taxon_id if found.
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-    from species_utils import get_species_suggestion
 
     results = []
     with Progress(
@@ -100,32 +98,12 @@ def upload_batch(
         for record in records:
             cropped_path: Path = record["cropped"]
             observed_dt: datetime = record["datetime"]
-            yolo_class: str | None = record.get("class_label")
+            lat: float = record["lat"]
+            lon: float = record["lon"]
+            species_info: dict | None = record.get("species")
+            taxon_id: int | None = species_info.get("taxon_id") if species_info else None
 
-            progress.update(task, description=f"Processing {cropped_path.name}")
-
-            taxon_id = None
-            species_info = None
-            forced_taxon_id = record.get("_forced_taxon_id")
-            if forced_taxon_id:
-                taxon_id = forced_taxon_id
-                species_info = {"taxon_id": forced_taxon_id, "name": "", "common_name": "", "score": 1.0, "source": "override", "low_confidence": False}
-            elif not dry_run:
-                try:
-                    species_info = get_species_suggestion(
-                        cropped_path,
-                        lat,
-                        lon,
-                        observed_dt.strftime("%Y-%m-%d"),
-                        access_token,
-                        yolo_class=yolo_class,
-                        cv_threshold=cv_threshold,
-                    )
-                    if species_info:
-                        taxon_id = species_info.get("taxon_id")
-                except Exception:
-                    pass
-
+            progress.update(task, description=f"Uploading {cropped_path.name}")
             try:
                 result = upload_observation(
                     cropped_path=cropped_path,
@@ -140,7 +118,8 @@ def upload_batch(
                 )
                 result["species"] = species_info
             except Exception as e:
-                result = {"status": "error", "file": cropped_path.name, "error": str(e), "species": None}
+                result = {"status": "error", "file": cropped_path.name,
+                          "error": str(e), "species": species_info}
 
             results.append(result)
             progress.advance(task)

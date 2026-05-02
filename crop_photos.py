@@ -39,7 +39,7 @@ def add_padding_and_square(
     box: tuple[int, int, int, int],
     img_w: int,
     img_h: int,
-    padding: float = 0.20,
+    padding: float = 0.30,
 ) -> tuple[int, int, int, int]:
     x1, y1, x2, y2 = box
     w = x2 - x1

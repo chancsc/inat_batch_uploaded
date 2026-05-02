@@ -9,6 +9,11 @@ import pyinaturalist
 _token: str | None = None
 
 
+def clear_token() -> None:
+    global _token
+    _token = None
+
+
 def get_token() -> str:
     """Return a valid iNaturalist API token.
 
@@ -16,16 +21,26 @@ def get_token() -> str:
     so no OAuth2 app registration is needed.  Falls back to the full OAuth2 flow
     using INAT_APP_ID / INAT_APP_SECRET / INAT_USERNAME / INAT_PASSWORD if the
     direct token is not set.
+
+    INAT_API_TOKEN is NOT cached — it is re-read from the .env file on every call
+    so that an updated token takes effect immediately without a server restart.
+    OAuth2 tokens ARE cached (and cleared by clear_token() on 401).
     """
     global _token
+    import os
+    from pathlib import Path
+    # Read directly from .env file so updates take effect without restart
+    env_file = Path(__file__).parent / ".env"
+    if env_file.exists():
+        from dotenv import dotenv_values
+        direct = dotenv_values(env_file).get("INAT_API_TOKEN", "").strip()
+    else:
+        direct = os.environ.get("INAT_API_TOKEN", "").strip()
+    if direct:
+        return direct          # always fresh from file, never cached
     if _token:
         return _token
-    import os
-    direct = os.environ.get("INAT_API_TOKEN", "").strip()
-    if direct:
-        _token = direct
-    else:
-        _token = pyinaturalist.get_access_token()
+    _token = pyinaturalist.get_access_token()
     return _token
 
 

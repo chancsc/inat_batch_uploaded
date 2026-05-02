@@ -20,6 +20,21 @@ _job: dict = {"status": "idle", "progress": [], "records": [], "error": None}
 _lock = threading.Lock()
 
 
+def _inat_token() -> str:
+    """Return a valid token, refreshing once if the cached one is stale."""
+    from inat_uploader import get_token
+    return get_token()
+
+
+def _is_401(exc: Exception) -> bool:
+    return getattr(getattr(exc, "response", None), "status_code", None) == 401
+
+
+def _using_env_token() -> bool:
+    """True when auth relies on a static INAT_API_TOKEN (can't be auto-refreshed)."""
+    return bool(os.environ.get("INAT_API_TOKEN", "").strip())
+
+
 def _reset():
     with _lock:
         _job.update(status="idle", progress=[], records=[], error=None)
@@ -231,7 +246,6 @@ def api_recrop():
 @app.route("/api/reidentify", methods=["POST"])
 def api_reidentify():
     """Re-run iNat CV species identification for the given record indices."""
-    from inat_uploader import get_token
     from species_utils import get_species_suggestion
 
     data = request.json or {}
@@ -244,29 +258,33 @@ def api_reidentify():
     if not records:
         return jsonify({"error": "No records loaded"}), 400
 
-    try:
-        token = get_token()
-    except Exception as e:
-        return jsonify({"error": f"Auth failed: {e}"}), 500
-
+    from inat_uploader import clear_token, get_token
+    max_attempts = 1 if _using_env_token() else 2
     targets = indices if indices else list(range(len(records)))
     updated = {}
     for i in targets:
         if i < 0 or i >= len(records):
             continue
         rec = records[i]
-        try:
-            dt_str = rec["datetime"][:10] if rec["datetime"] else datetime.now().strftime("%Y-%m-%d")
-            species = get_species_suggestion(
-                photo_path=Path(rec["cropped"]),
-                lat=rec["lat"],
-                lon=rec["lon"],
-                observed_on=dt_str,
-                token=token,
-                cv_threshold=cv_threshold,
-            )
-        except Exception:
-            species = None
+        dt_str = rec["datetime"][:10] if rec["datetime"] else datetime.now().strftime("%Y-%m-%d")
+        species = None
+        for attempt in range(max_attempts):
+            try:
+                token = get_token()
+                species = get_species_suggestion(
+                    photo_path=Path(rec["cropped"]),
+                    lat=rec["lat"],
+                    lon=rec["lon"],
+                    observed_on=dt_str,
+                    token=token,
+                    cv_threshold=cv_threshold,
+                )
+                break
+            except Exception as e:
+                if _is_401(e) and not _using_env_token() and attempt == 0:
+                    clear_token()
+                    continue
+                break
         with _lock:
             _job["records"][i]["species"] = species
         updated[i] = species
@@ -277,7 +295,6 @@ def api_reidentify():
 @app.route("/api/suggest")
 def api_suggest():
     """Return top-N iNat CV suggestions for a single record (no auto-apply)."""
-    from inat_uploader import get_token
     from species_utils import query_inat_cv
 
     idx = int(request.args.get("index", 0))
@@ -289,25 +306,32 @@ def api_suggest():
         return jsonify({"error": "invalid index"}), 400
 
     rec = records[idx]
-    try:
-        token = get_token()
-    except Exception as e:
-        return jsonify({"error": f"Auth failed: {e}"}), 500
-
     dt_str = rec["datetime"][:10] if rec["datetime"] else datetime.now().strftime("%Y-%m-%d")
-    try:
-        suggestions = query_inat_cv(
-            photo_path=Path(rec["cropped"]),
-            lat=rec["lat"],
-            lon=rec["lon"],
-            observed_on=dt_str,
-            token=token,
-            top_n=top_n,
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
-    return jsonify({"suggestions": suggestions})
+    from inat_uploader import clear_token, get_token
+    max_attempts = 1 if _using_env_token() else 2
+    for attempt in range(max_attempts):
+        try:
+            token = get_token()
+            suggestions = query_inat_cv(
+                photo_path=Path(rec["cropped"]),
+                lat=rec["lat"],
+                lon=rec["lon"],
+                observed_on=dt_str,
+                token=token,
+                top_n=top_n,
+            )
+            return jsonify({"suggestions": suggestions})
+        except Exception as e:
+            if _is_401(e):
+                if _using_env_token():
+                    return jsonify({"error": "Token expired — update INAT_API_TOKEN in .env"}), 401
+                if attempt == 0:
+                    clear_token()
+                    continue
+            return jsonify({"error": str(e)}), 500
+
+    return jsonify({"error": "Auth failed after token refresh"}), 500
 
 
 @app.route("/api/set_species", methods=["POST"])
@@ -326,15 +350,39 @@ def api_set_species():
     return jsonify({"ok": True})
 
 
+_UPLOAD_DIR = Path("./uploaded_photos")
+
+
+@app.route("/api/receive_photos", methods=["POST"])
+def api_receive_photos():
+    """Accept photos uploaded from the browser and store them server-side."""
+    files = request.files.getlist("photos")
+    if not files:
+        return jsonify({"error": "No files provided"}), 400
+
+    _UPLOAD_DIR.mkdir(exist_ok=True)
+    for f in _UPLOAD_DIR.glob("*"):
+        f.unlink(missing_ok=True)
+
+    saved = 0
+    for f in files:
+        if f.filename:
+            f.save(str(_UPLOAD_DIR / Path(f.filename).name))
+            saved += 1
+
+    return jsonify({"ok": True, "path": str(_UPLOAD_DIR.resolve()), "count": saved})
+
+
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     from inat_uploader import get_token, upload_observation
 
     data = request.json or {}
-    indices     = data.get("indices", [])
-    dry_run     = data.get("dry_run", False)
-    tags        = data.get("tags", [])
-    description = data.get("description", "")
+    indices      = data.get("indices", [])
+    dry_run      = data.get("dry_run", False)
+    tags         = data.get("tags", [])
+    description  = data.get("description", "")
+    delete_after = data.get("delete_after", False)
 
     with _lock:
         records = list(_job["records"])
@@ -367,6 +415,12 @@ def api_upload():
             )
             result["source"] = rec["source"]
             result["species"] = species
+            if delete_after and result["status"] == "ok":
+                try:
+                    Path(rec["source"]).unlink(missing_ok=True)
+                    result["deleted"] = True
+                except Exception:
+                    result["deleted"] = False
         except Exception as e:
             result = {"status": "error", "file": rec["source"], "error": str(e), "species": species}
         results.append(result)

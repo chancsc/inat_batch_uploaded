@@ -72,7 +72,15 @@
   .modal-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;max-width:95vw;max-height:92vh;display:flex;flex-direction:column;gap:12px;z-index:101;}
   .modal-box h3{font-size:.95rem;font-weight:600;}
   #canvas-wrap{overflow:auto;flex:1;display:flex;align-items:center;justify-content:center;}
-  #crop-canvas{cursor:crosshair;display:block;max-width:100%;touch-action:none;}
+  /* Crop modal — near-fullscreen */
+  #crop-box{width:98vw;height:94vh;max-width:98vw;max-height:94vh;padding:12px;}
+  #crop-box #canvas-wrap{align-items:flex-start;}
+  #crop-canvas{cursor:crosshair;display:block;touch-action:none;}
+  .upload-area{border:2px dashed var(--border);border-radius:8px;padding:14px 12px;text-align:center;cursor:pointer;transition:border-color .15s;margin-top:6px;}
+  .upload-area:hover,.upload-area.dragover{border-color:var(--accent);}
+  .upload-area input[type=file]{display:none;}
+  .upload-area label{cursor:pointer;font-size:.83rem;color:var(--muted);display:block;}
+  .or-divider{text-align:center;color:var(--muted);font-size:.75rem;margin:6px 0;}
   .modal-hint{font-size:.75rem;color:var(--muted);}
   /* Species suggestion modal */
   #suggest-box{min-width:300px;max-width:480px;}
@@ -105,10 +113,10 @@
 <!-- Crop modal -->
 <div id="crop-modal" class="hidden">
   <div class="modal-backdrop" onclick="closeCrop()">
-    <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-box" id="crop-box" onclick="event.stopPropagation()">
       <h3>Draw crop area</h3>
-      <p class="modal-hint">Drag to select a square region to keep.</p>
       <div id="canvas-wrap"><canvas id="crop-canvas"></canvas></div>
+      <p class="modal-hint">Drag to draw • Drag edges/corners to resize • Drag inside to move</p>
       <div class="btn-row">
         <button class="btn-primary btn-sm" onclick="applyCrop()">Apply crop</button>
         <button class="btn-outline btn-sm" onclick="closeCrop()">Cancel</button>
@@ -140,6 +148,11 @@
     <div class="field">
       <label>Photos directory (server path)</label>
       <input type="text" id="photos-dir" value="/root/storage/pictures">
+      <div class="or-divider">— or upload from device —</div>
+      <div class="upload-area" id="upload-area">
+        <input type="file" id="photo-files" multiple accept="image/jpeg,image/png,.jpg,.jpeg,.png">
+        <label for="photo-files" id="file-label">📁 Choose photos or drag &amp; drop</label>
+      </div>
     </div>
     <div class="field">
       <label>Trip location</label>
@@ -184,6 +197,10 @@
     <label>Description (optional)</label>
     <input type="text" id="description" placeholder="e.g. Trail sighting">
   </div>
+  <label class="check-row" style="margin-bottom:10px">
+    <input type="checkbox" id="delete-after">
+    Delete source photos from device after successful upload
+  </label>
   <div class="btn-row">
     <button class="btn-success" id="btn-upload" onclick="doUpload(false)">Upload selected</button>
     <button class="btn-outline" id="btn-dryrun" onclick="doUpload(true)">Dry run</button>
@@ -205,13 +222,14 @@ let records = [];
 let selected = new Set();
 let pollTimer = null;
 let lastLogLen = 0;
+let droppedFiles = null;  // files from drag-and-drop
 
 // ── crop state ────────────────────────────────────────
 let cropIdx = -1;
 let cropStart = null;
-let cropRect  = null;  // {x,y,w,h} in canvas display coords
+let cropRect  = null;
 let isDragging = false;
-let naturalW = 0, naturalH = 0;  // original image pixel dims
+let naturalW = 0, naturalH = 0;
 
 function setBadge(s){
   const b=document.getElementById('status-badge');
@@ -219,18 +237,35 @@ function setBadge(s){
 }
 
 async function startProcess(){
-  const photosDir  = document.getElementById('photos-dir').value.trim();
+  let photosDir    = document.getElementById('photos-dir').value.trim();
   const location   = document.getElementById('location').value.trim();
   const modelPath  = document.getElementById('model-path').value.trim();
   const cvThr      = parseFloat(document.getElementById('cv-threshold').value);
   const skipYolo   = document.getElementById('skip-yolo').checked;
 
-  if(!photosDir||!location){alert('Photos directory and location are required.');return;}
+  if(!location){alert('Trip location is required.');return;}
 
   document.getElementById('btn-process').disabled=true;
   show('log-card'); hide('grid-card'); hide('result-card');
   document.getElementById('log-box').innerHTML='';
   lastLogLen=0; setBadge('processing');
+
+  // If the user selected / dropped files, upload them to the server first
+  const files = droppedFiles || document.getElementById('photo-files').files;
+  if(files && files.length > 0){
+    appendLog(`Uploading ${files.length} photo(s) to server…`);
+    const fd = new FormData();
+    for(const f of files) fd.append('photos', f);
+    const ur = await fetch('/api/receive_photos', {method:'POST', body:fd});
+    const ud = await ur.json();
+    if(ud.error){appendLog('Upload error: '+ud.error,'log-err');setBadge('error');document.getElementById('btn-process').disabled=false;return;}
+    photosDir = ud.path;
+    appendLog(`Saved ${ud.count} photo(s) → ${ud.path}`);
+  } else if(!photosDir){
+    alert('Enter a photos directory or select files from your device.');
+    document.getElementById('btn-process').disabled=false;
+    return;
+  }
 
   const resp=await fetch('/api/process',{
     method:'POST',headers:{'Content-Type':'application/json'},
@@ -270,11 +305,12 @@ function cardHtml(rec,i){
   const imgUrl='/api/image?path='+encodeURIComponent(rec.cropped)+'&t='+Date.now();
   let spHtml='<div class="obs-species" style="color:var(--muted)">[unknown]</div>';
   if(sp){
-    const sc=sp.score>=0.60?'score-hi':'score-lo';
+    const sc=(sp.score!=null&&sp.score>=0.60)?'score-hi':'score-lo';
     const w=sp.low_confidence?' ⚠':'';
+    const scoreStr=sp.score!=null?`cv: ${sp.score.toFixed(2)}${w}`:'';
     spHtml=`<div class="obs-species">${sp.common_name||sp.name||'—'}</div>
             <div class="obs-common">${sp.common_name?sp.name:''}</div>
-            <div class="obs-score ${sc}">cv: ${sp.score.toFixed(2)}${w}</div>`;
+            ${scoreStr?`<div class="obs-score ${sc}">${scoreStr}</div>`:''}`;
   }
   const badge=rec.fallback?'<span class="obs-badge">full img</span>':'';
   const dt=rec.datetime?rec.datetime.replace('T',' ').slice(0,16):'—';
@@ -423,27 +459,30 @@ function closeSuggest(){
 }
 
 // ── Crop canvas ───────────────────────────────────────
+const HS = 10; // handle half-size in px
+
 function openCrop(i,ev){
   ev.stopPropagation();
-  cropIdx=i; cropRect=null; cropStart=null; isDragging=false;
-  const modal=document.getElementById('crop-modal');
-  modal.classList.remove('hidden');
-
-  const canvas=document.getElementById('crop-canvas');
-  const img=new Image();
-  img.onload=()=>{
-    naturalW=img.naturalWidth; naturalH=img.naturalHeight;
-    // Scale to fit within 80vw × 70vh
-    const maxW=Math.min(window.innerWidth*0.80,900);
-    const maxH=window.innerHeight*0.68;
-    const scale=Math.min(maxW/naturalW,maxH/naturalH,1);
-    canvas.width=Math.round(naturalW*scale);
-    canvas.height=Math.round(naturalH*scale);
-    canvas._scale=scale;
-    const ctx=canvas.getContext('2d');
-    ctx.drawImage(img,0,0,canvas.width,canvas.height);
-  };
-  img.src='/api/image?path='+encodeURIComponent(records[i].source);
+  cropIdx=i; cropRect=null; cropStart=null; cropState='idle';
+  document.getElementById('crop-modal').classList.remove('hidden');
+  requestAnimationFrame(()=>{
+    const wrap=document.getElementById('canvas-wrap');
+    const maxW=Math.max(200,wrap.clientWidth-4);
+    const maxH=Math.max(200,window.innerHeight*0.80);
+    const canvas=document.getElementById('crop-canvas');
+    const img=new Image();
+    img.onload=()=>{
+      naturalW=img.naturalWidth; naturalH=img.naturalHeight;
+      const scale=Math.min(maxW/naturalW,maxH/naturalH,1);
+      canvas.width=Math.round(naturalW*scale);
+      canvas.height=Math.round(naturalH*scale);
+      canvas.style.width=canvas.width+'px';
+      canvas.style.height=canvas.height+'px';
+      canvas._scale=scale;
+      canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+    };
+    img.src='/api/image?path='+encodeURIComponent(records[i].source);
+  });
 }
 
 function closeCrop(){document.getElementById('crop-modal').classList.add('hidden');}
@@ -452,27 +491,72 @@ function canvasPos(e){
   const c=document.getElementById('crop-canvas');
   const r=c.getBoundingClientRect();
   const src=e.touches?e.touches[0]:e;
-  return {x:src.clientX-r.left,y:src.clientY-r.top};
+  return {x:(src.clientX-r.left)*(c.width/r.width), y:(src.clientY-r.top)*(c.height/r.height)};
 }
+
+function getHandles(r){
+  return [
+    {id:'tl',x:r.x,      y:r.y,      cur:'nw-resize'},
+    {id:'tm',x:r.x+r.w/2,y:r.y,      cur:'n-resize'},
+    {id:'tr',x:r.x+r.w,  y:r.y,      cur:'ne-resize'},
+    {id:'ml',x:r.x,      y:r.y+r.h/2,cur:'w-resize'},
+    {id:'mr',x:r.x+r.w,  y:r.y+r.h/2,cur:'e-resize'},
+    {id:'bl',x:r.x,      y:r.y+r.h,  cur:'sw-resize'},
+    {id:'bm',x:r.x+r.w/2,y:r.y+r.h,  cur:'s-resize'},
+    {id:'br',x:r.x+r.w,  y:r.y+r.h,  cur:'se-resize'},
+  ];
+}
+
+function hitHandle(pos,rect){
+  for(const h of getHandles(rect))
+    if(Math.abs(pos.x-h.x)<=HS&&Math.abs(pos.y-h.y)<=HS) return h;
+  return null;
+}
+
+function hitBox(pos,rect){
+  return pos.x>=rect.x&&pos.x<=rect.x+rect.w&&pos.y>=rect.y&&pos.y<=rect.y+rect.h;
+}
+
+function applyHandle(h,delta,s){
+  let{x,y,w,h:ht}=s;
+  if(h.id.includes('l')){x+=delta.x;w-=delta.x;}
+  if(h.id.includes('r')){w+=delta.x;}
+  if(h.id.includes('t')){y+=delta.y;ht-=delta.y;}
+  if(h.id.includes('b')){ht+=delta.y;}
+  if(w<10){w=10;if(h.id.includes('l'))x=s.x+s.w-10;}
+  if(ht<10){ht=10;if(h.id.includes('t'))y=s.y+s.h-10;}
+  return{x,y,w,h:ht};
+}
+
+// crop interaction state
+let cropState='idle'; // idle | drawing | ready | drag-handle | drag-box
+let activeHandle=null, dragStart=null, rectAtDrag=null;
 
 function drawCanvas(){
   const c=document.getElementById('crop-canvas');
   const ctx=c.getContext('2d');
-  // Redraw image (store it in offscreen if needed, but canvas keeps it)
   ctx.clearRect(0,0,c.width,c.height);
-  // Re-draw source image
   const img=new Image();
   img.onload=()=>{
     ctx.drawImage(img,0,0,c.width,c.height);
-    if(cropRect){
-      ctx.fillStyle='rgba(0,0,0,0.45)';
-      ctx.fillRect(0,0,c.width,c.height);
-      const{x,y,w,h}=cropRect;
-      ctx.clearRect(x,y,w,h);
-      ctx.strokeStyle='#6c8eff';
-      ctx.lineWidth=2;
-      ctx.setLineDash([5,3]);
-      ctx.strokeRect(x,y,w,h);
+    if(!cropRect)return;
+    // dim outside selection
+    ctx.fillStyle='rgba(0,0,0,0.12)';
+    ctx.fillRect(0,0,c.width,c.height);
+    const{x,y,w,h}=cropRect;
+    ctx.clearRect(x,y,w,h);
+    // border
+    ctx.strokeStyle='#6c8eff';
+    ctx.lineWidth=1.5;
+    ctx.setLineDash([]);
+    ctx.strokeRect(x,y,w,h);
+    // handles
+    ctx.fillStyle='#fff';
+    ctx.strokeStyle='#6c8eff';
+    ctx.lineWidth=1.5;
+    for(const h of getHandles(cropRect)){
+      ctx.fillRect(h.x-HS/2,h.y-HS/2,HS,HS);
+      ctx.strokeRect(h.x-HS/2,h.y-HS/2,HS,HS);
     }
   };
   img.src='/api/image?path='+encodeURIComponent(records[cropIdx].source);
@@ -480,33 +564,47 @@ function drawCanvas(){
 
 const cv=()=>document.getElementById('crop-canvas');
 
-cv().addEventListener('mousedown',e=>{cropStart=canvasPos(e);isDragging=true;});
-cv().addEventListener('touchstart',e=>{e.preventDefault();cropStart=canvasPos(e);isDragging=true;},{passive:false});
-
-function squareRect(start, p){
-  const dx = p.x - start.x, dy = p.y - start.y;
-  const side = Math.min(Math.abs(dx), Math.abs(dy));
-  return {
-    x: dx >= 0 ? start.x : start.x - side,
-    y: dy >= 0 ? start.y : start.y - side,
-    w: side, h: side,
-  };
+function onDown(e){
+  if(e.cancelable)e.preventDefault();
+  const pos=canvasPos(e);
+  if(cropRect){
+    const h=hitHandle(pos,cropRect);
+    if(h){cropState='drag-handle';activeHandle=h;dragStart=pos;rectAtDrag={...cropRect};return;}
+    if(hitBox(pos,cropRect)){cropState='drag-box';dragStart=pos;rectAtDrag={...cropRect};return;}
+  }
+  cropState='drawing'; cropStart=pos; cropRect=null;
+}
+function onMove(e){
+  if(e.cancelable)e.preventDefault();
+  const pos=canvasPos(e);
+  if(cropState==='drawing'){
+    const dx=pos.x-cropStart.x, dy=pos.y-cropStart.y;
+    const side=Math.min(Math.abs(dx),Math.abs(dy));
+    cropRect={x:dx>=0?cropStart.x:cropStart.x-side, y:dy>=0?cropStart.y:cropStart.y-side, w:side, h:side};
+    drawCanvas();
+  } else if(cropState==='drag-handle'){
+    cropRect=applyHandle(activeHandle,{x:pos.x-dragStart.x,y:pos.y-dragStart.y},rectAtDrag);
+    drawCanvas();
+  } else if(cropState==='drag-box'){
+    cropRect={...rectAtDrag,x:rectAtDrag.x+(pos.x-dragStart.x),y:rectAtDrag.y+(pos.y-dragStart.y)};
+    drawCanvas();
+  } else if(cropRect){
+    const h=hitHandle(pos,cropRect);
+    cv().style.cursor=h?h.cur:hitBox(pos,cropRect)?'move':'crosshair';
+  }
+}
+function onUp(){
+  if(cropState==='drawing'&&cropRect&&(cropRect.w<5||cropRect.h<5))cropRect=null;
+  cropState='ready';
+  drawCanvas();
 }
 
-cv().addEventListener('mousemove',e=>{
-  if(!isDragging||!cropStart)return;
-  cropRect=squareRect(cropStart,canvasPos(e));
-  drawCanvas();
-});
-cv().addEventListener('touchmove',e=>{
-  e.preventDefault();
-  if(!isDragging||!cropStart)return;
-  cropRect=squareRect(cropStart,canvasPos(e));
-  drawCanvas();
-},{passive:false});
-
-cv().addEventListener('mouseup',()=>{isDragging=false;});
-cv().addEventListener('touchend',()=>{isDragging=false;});
+cv().addEventListener('mousedown',onDown);
+cv().addEventListener('mousemove',onMove);
+cv().addEventListener('mouseup',onUp);
+cv().addEventListener('touchstart',onDown,{passive:false});
+cv().addEventListener('touchmove',onMove,{passive:false});
+cv().addEventListener('touchend',onUp);
 
 async function applyCrop(){
   if(!cropRect||cropRect.w<5||cropRect.h<5){alert('Draw a selection first.');return;}
@@ -533,9 +631,10 @@ async function doUpload(dryRun){
   document.getElementById('btn-upload').disabled=true;
   document.getElementById('btn-dryrun').disabled=true;
   const description=document.getElementById('description').value.trim();
+  const deleteAfter=!dryRun&&document.getElementById('delete-after').checked;
   const resp=await fetch('/api/upload',{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({indices:Array.from(selected),dry_run:dryRun,description,tags:[]}),
+    body:JSON.stringify({indices:Array.from(selected),dry_run:dryRun,description,tags:[],delete_after:deleteAfter}),
   });
   const results=await resp.json();
   if(results.error){alert('Upload error: '+results.error);updateSelCount();return;}
@@ -551,7 +650,7 @@ function renderResults(results,dryRun){
   html+=`<table class="result-table"><thead><tr><th>File</th><th>Species</th><th>Status</th><th>Link</th></tr></thead><tbody>`;
   for(const r of results){
     const sp=r.species;
-    const spLabel=sp?(sp.common_name||sp.name||'—')+` (cv:${sp.score.toFixed(2)})`:'—';
+    const spLabel=sp?(sp.common_name||sp.name||'—')+(sp.score!=null?` (cv:${sp.score.toFixed(2)})`:''): '—';
     const pill=r.status==='ok'?'pill-ok':r.status==='dry_run'?'pill-dry':'pill-err';
     const pillTxt=r.status==='ok'?'uploaded':r.status==='dry_run'?'dry run':'error';
     const link=r.url?`<a class="obs-url" href="${r.url}" target="_blank">view ↗</a>`:(r.error||'');
@@ -579,6 +678,23 @@ function resetAll(){
 
 function show(id){document.getElementById(id).classList.remove('hidden');}
 function hide(id){document.getElementById(id).classList.add('hidden');}
+
+// ── File upload area ──────────────────────────────────
+document.getElementById('photo-files').addEventListener('change',function(){
+  const n=this.files.length;
+  droppedFiles=null;
+  document.getElementById('file-label').textContent=n>0?`${n} photo(s) selected`:'📁 Choose photos or drag & drop';
+  if(n>0) document.getElementById('photos-dir').value='';
+});
+const uploadArea=document.getElementById('upload-area');
+uploadArea.addEventListener('dragover',e=>{e.preventDefault();uploadArea.classList.add('dragover');});
+uploadArea.addEventListener('dragleave',()=>uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop',e=>{
+  e.preventDefault(); uploadArea.classList.remove('dragover');
+  droppedFiles=e.dataTransfer.files;
+  document.getElementById('file-label').textContent=`${droppedFiles.length} photo(s) selected`;
+  document.getElementById('photos-dir').value='';
+});
 </script>
 </body>
 </html>

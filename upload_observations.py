@@ -169,8 +169,6 @@ def upload(
                     "source": "override",
                     "low_confidence": False,
                 }
-            elif dry_run:
-                record["species"] = None  # skip CV calls in dry-run
             else:
                 try:
                     record["species"] = get_species_suggestion(

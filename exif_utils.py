@@ -38,3 +38,31 @@ def get_photo_datetime(image_path: Path) -> datetime:
         return dt
     mtime = os.path.getmtime(image_path)
     return datetime.fromtimestamp(mtime)
+
+
+def get_exif_gps(image_path: Path) -> tuple[float, float] | None:
+    exif = _get_raw_exif(image_path)
+    if not exif:
+        return None
+    gps = exif.get("GPSInfo")
+    if not gps:
+        return None
+    try:
+        def _rat(v) -> float:
+            # IFDRational, plain float, or (num, denom) tuple
+            if hasattr(v, "numerator"):
+                return float(v.numerator) / float(v.denominator)
+            if isinstance(v, tuple):
+                return v[0] / v[1]
+            return float(v)
+
+        def _dms(tup, ref: str) -> float:
+            d, m, s = (_rat(x) for x in tup)
+            deg = d + m / 60 + s / 3600
+            return -deg if ref in ("S", "W") else deg
+
+        lat = _dms(gps[2], gps[1])
+        lon = _dms(gps[4], gps[3])
+        return lat, lon
+    except Exception:
+        return None

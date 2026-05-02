@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iNat Batch Uploader</title>
+<style>
+  :root {
+    --bg:#0f1117;--surface:#1a1d27;--border:#2d3148;
+    --accent:#6c8eff;--accent2:#4ade80;--warn:#facc15;
+    --err:#f87171;--text:#e2e8f0;--muted:#64748b;--radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;min-height:100vh;}
+  header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;gap:10px;}
+  header h1{font-size:1.1rem;font-weight:600;}
+  main{max-width:980px;margin:0 auto;padding:24px 16px;}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px;}
+  .card h2{font-size:.85rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px;}
+  .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
+  label{font-size:.82rem;color:var(--muted);}
+  input[type=text],input[type=number]{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:9px 12px;font-size:.9rem;width:100%;outline:none;transition:border-color .15s;}
+  input:focus{border-color:var(--accent);}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(max-width:520px){.row{grid-template-columns:1fr;}}
+  .check-row{display:flex;align-items:center;gap:8px;font-size:.87rem;margin-top:4px;cursor:pointer;}
+  .check-row input{width:auto;cursor:pointer;}
+
+  button{cursor:pointer;border:none;border-radius:6px;font-weight:600;font-size:.88rem;padding:10px 20px;transition:opacity .15s;}
+  button:disabled{opacity:.45;cursor:not-allowed;}
+  .btn-primary{background:var(--accent);color:#fff;}
+  .btn-success{background:var(--accent2);color:#000;}
+  .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);}
+  .btn-warn{background:var(--warn);color:#000;}
+  .btn-sm{padding:5px 12px;font-size:.78rem;}
+  .btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px;}
+
+  #log-box{font-family:monospace;font-size:.8rem;background:#0b0d14;border-radius:6px;padding:12px;max-height:200px;overflow-y:auto;color:#94a3b8;line-height:1.6;}
+  .log-done{color:var(--accent2)!important;}
+  .log-err{color:var(--err)!important;}
+
+  /* Photo grid */
+  #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;}
+  .obs-card{background:var(--surface);border:2px solid var(--border);border-radius:var(--radius);overflow:hidden;user-select:none;transition:border-color .15s,transform .1s;position:relative;}
+  .obs-card:hover{transform:translateY(-2px);}
+  .obs-card.selected{border-color:var(--accent);}
+  .obs-card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#111;cursor:pointer;}
+  .obs-body{padding:9px;}
+  .obs-file{font-size:.7rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .obs-species{font-size:.8rem;font-weight:600;margin:3px 0 2px;}
+  .obs-common{font-size:.73rem;color:var(--muted);}
+  .obs-score{font-size:.7rem;}
+  .score-hi{color:var(--accent2);}
+  .score-lo{color:var(--warn);}
+  .obs-badge{display:inline-block;font-size:.62rem;padding:1px 5px;border-radius:3px;background:#2d3148;color:var(--muted);margin-top:3px;}
+  .card-actions{display:flex;gap:6px;padding:0 9px 9px;flex-wrap:wrap;}
+
+  /* Result table */
+  .result-table{width:100%;border-collapse:collapse;font-size:.83rem;}
+  .result-table th{text-align:left;padding:8px 10px;color:var(--muted);border-bottom:1px solid var(--border);}
+  .result-table td{padding:8px 10px;border-bottom:1px solid var(--border);word-break:break-all;}
+  .pill{display:inline-block;border-radius:4px;padding:2px 8px;font-size:.75rem;font-weight:600;}
+  .pill-ok{background:#14532d;color:var(--accent2);}
+  .pill-dry{background:#1e3a5f;color:var(--accent);}
+  .pill-err{background:#450a0a;color:var(--err);}
+  a.obs-url{color:var(--accent);text-decoration:none;}
+  a.obs-url:hover{text-decoration:underline;}
+
+  /* Modals */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;display:flex;align-items:center;justify-content:center;}
+  .modal-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;max-width:95vw;max-height:92vh;display:flex;flex-direction:column;gap:12px;z-index:101;}
+  .modal-box h3{font-size:.95rem;font-weight:600;}
+  #canvas-wrap{overflow:auto;flex:1;display:flex;align-items:center;justify-content:center;}
+  #crop-canvas{cursor:crosshair;display:block;max-width:100%;touch-action:none;}
+  .modal-hint{font-size:.75rem;color:var(--muted);}
+  /* Species suggestion modal */
+  #suggest-box{min-width:300px;max-width:480px;}
+  .sug-option{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:7px;cursor:pointer;transition:background .12s;}
+  .sug-option:hover{background:var(--border);}
+  .sug-option input[type=radio]{margin-top:3px;accent-color:var(--accent);flex-shrink:0;}
+  .sug-label{display:flex;flex-direction:column;gap:2px;}
+  .sug-name{font-size:.88rem;font-weight:600;}
+  .sug-sci{font-size:.75rem;color:var(--muted);}
+  .sug-score{font-size:.72rem;}
+  .sug-divider{height:1px;background:var(--border);margin:4px 0;}
+  #suggest-loading{color:var(--muted);font-size:.85rem;padding:8px 0;}
+
+  .hidden{display:none!important;}
+  #status-badge{font-size:.78rem;padding:3px 10px;border-radius:20px;background:var(--border);color:var(--muted);}
+  #status-badge.processing{background:#1e3a5f;color:var(--accent);}
+  #status-badge.done{background:#14532d;color:var(--accent2);}
+  #status-badge.error{background:#450a0a;color:var(--err);}
+  #sel-count{color:var(--muted);font-size:.85rem;}
+</style>
+</head>
+<body>
+<header>
+  <span>🦋</span>
+  <h1>iNat Batch Uploader</h1>
+  <div style="flex:1"></div>
+  <span id="status-badge">idle</span>
+</header>
+
+<!-- Crop modal -->
+<div id="crop-modal" class="hidden">
+  <div class="modal-backdrop" onclick="closeCrop()">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <h3>Draw crop area</h3>
+      <p class="modal-hint">Drag to select a square region to keep.</p>
+      <div id="canvas-wrap"><canvas id="crop-canvas"></canvas></div>
+      <div class="btn-row">
+        <button class="btn-primary btn-sm" onclick="applyCrop()">Apply crop</button>
+        <button class="btn-outline btn-sm" onclick="closeCrop()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Species suggestion modal -->
+<div id="suggest-modal" class="hidden">
+  <div class="modal-backdrop" onclick="closeSuggest()">
+    <div class="modal-box" id="suggest-box" onclick="event.stopPropagation()">
+      <h3>Species identification</h3>
+      <div id="suggest-loading">Loading suggestions…</div>
+      <div id="suggest-options" class="hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary btn-sm" onclick="applySuggest()">Apply</button>
+        <button class="btn-outline btn-sm" onclick="closeSuggest()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<main>
+
+<div class="card" id="form-card">
+  <h2>Configuration</h2>
+  <div class="row">
+    <div class="field">
+      <label>Photos directory (server path)</label>
+      <input type="text" id="photos-dir" value="/root/storage/pictures">
+    </div>
+    <div class="field">
+      <label>Trip location</label>
+      <input type="text" id="location" placeholder="Hulu Langat  or  3.08, 101.83">
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <label>YOLO model path</label>
+      <input type="text" id="model-path" value="{{ model_path }}">
+    </div>
+    <div class="field">
+      <label>CV confidence threshold</label>
+      <input type="number" id="cv-threshold" value="0.60" min="0" max="1" step="0.05">
+    </div>
+  </div>
+  <label class="check-row">
+    <input type="checkbox" id="skip-yolo">
+    Skip YOLO detection (use full images as-is)
+  </label>
+  <div class="btn-row" style="margin-top:14px">
+    <button class="btn-primary" id="btn-process" onclick="startProcess()">Process Photos</button>
+  </div>
+</div>
+
+<div class="card hidden" id="log-card">
+  <h2>Processing log</h2>
+  <div id="log-box"></div>
+</div>
+
+<div class="card hidden" id="grid-card">
+  <h2>Review observations</h2>
+  <div class="btn-row" style="margin-bottom:14px">
+    <button class="btn-outline btn-sm" onclick="selectAll()">Select all</button>
+    <button class="btn-outline btn-sm" onclick="selectNone()">Select none</button>
+    <button class="btn-warn btn-sm" onclick="reidentifyAll()" id="btn-reidentify">Re-identify all</button>
+    <span id="sel-count"></span>
+  </div>
+  <div id="grid"></div>
+  <div style="height:1px;background:var(--border);margin:18px 0"></div>
+  <div class="field" style="max-width:400px">
+    <label>Description (optional)</label>
+    <input type="text" id="description" placeholder="e.g. Trail sighting">
+  </div>
+  <div class="btn-row">
+    <button class="btn-success" id="btn-upload" onclick="doUpload(false)">Upload selected</button>
+    <button class="btn-outline" id="btn-dryrun" onclick="doUpload(true)">Dry run</button>
+    <button class="btn-outline btn-sm" onclick="resetAll()">Start over</button>
+  </div>
+</div>
+
+<div class="card hidden" id="result-card">
+  <h2>Upload results</h2>
+  <div id="result-body"></div>
+  <div class="btn-row" style="margin-top:14px">
+    <button class="btn-outline btn-sm" onclick="resetAll()">Start over</button>
+  </div>
+</div>
+
+</main>
+<script>
+let records = [];
+let selected = new Set();
+let pollTimer = null;
+let lastLogLen = 0;
+
+// ── crop state ────────────────────────────────────────
+let cropIdx = -1;
+let cropStart = null;
+let cropRect  = null;  // {x,y,w,h} in canvas display coords
+let isDragging = false;
+let naturalW = 0, naturalH = 0;  // original image pixel dims
+
+function setBadge(s){
+  const b=document.getElementById('status-badge');
+  b.className=s; b.textContent=s;
+}
+
+async function startProcess(){
+  const photosDir  = document.getElementById('photos-dir').value.trim();
+  const location   = document.getElementById('location').value.trim();
+  const modelPath  = document.getElementById('model-path').value.trim();
+  const cvThr      = parseFloat(document.getElementById('cv-threshold').value);
+  const skipYolo   = document.getElementById('skip-yolo').checked;
+
+  if(!photosDir||!location){alert('Photos directory and location are required.');return;}
+
+  document.getElementById('btn-process').disabled=true;
+  show('log-card'); hide('grid-card'); hide('result-card');
+  document.getElementById('log-box').innerHTML='';
+  lastLogLen=0; setBadge('processing');
+
+  const resp=await fetch('/api/process',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({photos_dir:photosDir,location,model_path:modelPath,
+                         cv_threshold:cvThr,skip_yolo:skipYolo}),
+  });
+  const data=await resp.json();
+  if(data.error){appendLog('Error: '+data.error,'log-err');setBadge('error');return;}
+  pollTimer=setInterval(pollStatus,1000);
+}
+
+async function pollStatus(){
+  const resp=await fetch('/api/status');
+  const data=await resp.json();
+  const box=document.getElementById('log-box');
+  for(let i=lastLogLen;i<data.progress.length;i++){
+    const line=data.progress[i];
+    const cls=line.startsWith('Done')?'log-done':line.startsWith('Error')||line.includes('Traceback')?'log-err':'';
+    const el=document.createElement('div');
+    el.textContent=line; if(cls)el.className=cls;
+    box.appendChild(el); box.scrollTop=box.scrollHeight;
+  }
+  lastLogLen=data.progress.length;
+  if(data.status==='done'){clearInterval(pollTimer);setBadge('done');await loadRecords();}
+  else if(data.status==='error'){clearInterval(pollTimer);setBadge('error');document.getElementById('btn-process').disabled=false;}
+}
+
+async function loadRecords(){
+  const resp=await fetch('/api/records');
+  records=await resp.json();
+  selected=new Set(records.map((_,i)=>i));
+  renderGrid(); show('grid-card'); updateSelCount();
+}
+
+function cardHtml(rec,i){
+  const sp=rec.species;
+  const imgUrl='/api/image?path='+encodeURIComponent(rec.cropped)+'&t='+Date.now();
+  let spHtml='<div class="obs-species" style="color:var(--muted)">[unknown]</div>';
+  if(sp){
+    const sc=sp.score>=0.60?'score-hi':'score-lo';
+    const w=sp.low_confidence?' ⚠':'';
+    spHtml=`<div class="obs-species">${sp.common_name||sp.name||'—'}</div>
+            <div class="obs-common">${sp.common_name?sp.name:''}</div>
+            <div class="obs-score ${sc}">cv: ${sp.score.toFixed(2)}${w}</div>`;
+  }
+  const badge=rec.fallback?'<span class="obs-badge">full img</span>':'';
+  const dt=rec.datetime?rec.datetime.replace('T',' ').slice(0,16):'—';
+  const sel=selected.has(i)?'selected':'';
+  return `<div class="obs-card ${sel}" id="card-${i}" data-index="${i}">
+    <img src="${imgUrl}" loading="lazy" alt="${rec.source.split('/').pop()}"
+         onclick="toggleCard(${i})" title="Click to toggle selection">
+    <div class="obs-body">
+      <div class="obs-file">${rec.source.split('/').pop()}</div>
+      ${spHtml}
+      <div class="obs-score" style="color:var(--muted);margin-top:3px">${dt}</div>
+      ${badge}
+    </div>
+    <div class="card-actions">
+      <button class="btn-outline btn-sm" onclick="openCrop(${i},event)">✂ Crop</button>
+      <button class="btn-outline btn-sm" onclick="reidentifyOne(${i},event)">🔍 ID</button>
+    </div>
+  </div>`;
+}
+
+function renderGrid(){
+  document.getElementById('grid').innerHTML=records.map((r,i)=>cardHtml(r,i)).join('');
+}
+
+function refreshCard(i){
+  const el=document.getElementById('card-'+i);
+  if(el) el.outerHTML=cardHtml(records[i],i);
+}
+
+function toggleCard(i){
+  if(selected.has(i))selected.delete(i);else selected.add(i);
+  const card=document.getElementById('card-'+i);
+  if(card)card.classList.toggle('selected',selected.has(i));
+  updateSelCount();
+}
+
+function selectAll() {records.forEach((_,i)=>selected.add(i));renderGrid();updateSelCount();}
+function selectNone(){selected.clear();renderGrid();updateSelCount();}
+function updateSelCount(){
+  document.getElementById('sel-count').textContent=`${selected.size}/${records.length} selected`;
+  document.getElementById('btn-upload').disabled=selected.size===0;
+  document.getElementById('btn-dryrun').disabled=selected.size===0;
+}
+
+// ── Re-identify all ───────────────────────────────────
+async function reidentifyAll(){
+  const btn=document.getElementById('btn-reidentify');
+  btn.disabled=true; btn.textContent='Identifying…';
+  const cvThr=parseFloat(document.getElementById('cv-threshold').value);
+  const resp=await fetch('/api/reidentify',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({indices:[],cv_threshold:cvThr}),
+  });
+  const data=await resp.json();
+  if(data.error){alert(data.error);}
+  else{
+    Object.entries(data.updated).forEach(([i,sp])=>{records[i].species=sp;});
+    renderGrid();
+  }
+  btn.disabled=false; btn.textContent='Re-identify all';
+}
+
+// ── Species suggest modal ─────────────────────────────
+let suggestIdx = -1;
+let suggestCache = [];
+
+// Butterfly (Papilionoidea) as general fallback taxon
+const BUTTERFLY_TAXON = {taxon_id:47224, name:'Papilionoidea', common_name:'Butterflies', score:null, source:'manual', low_confidence:false};
+
+async function reidentifyOne(i, ev){
+  ev.stopPropagation();
+  suggestIdx = i;
+  document.getElementById('suggest-modal').classList.remove('hidden');
+  document.getElementById('suggest-loading').classList.remove('hidden');
+  document.getElementById('suggest-options').classList.add('hidden');
+
+  const resp = await fetch(`/api/suggest?index=${i}&top_n=5`);
+  const data = await resp.json();
+
+  document.getElementById('suggest-loading').classList.add('hidden');
+  const opts = document.getElementById('suggest-options');
+
+  if(data.error){ opts.innerHTML=`<p style="color:var(--err)">${data.error}</p>`; opts.classList.remove('hidden'); return; }
+
+  suggestCache = data.suggestions || [];
+  const sug = suggestCache;
+  let html = '';
+  sug.forEach((s,k)=>{
+    const sc = s.score >= 0.60 ? 'score-hi' : 'score-lo';
+    const pct = (s.score*100).toFixed(1);
+    html += `<label class="sug-option">
+      <input type="radio" name="sug" value="${k}">
+      <div class="sug-label">
+        <span class="sug-name">${s.common_name || s.name}</span>
+        ${s.common_name ? `<span class="sug-sci">${s.name}</span>` : ''}
+        <span class="sug-score ${sc}">${pct}% confidence</span>
+      </div></label>`;
+  });
+  html += '<div class="sug-divider"></div>';
+  html += `<label class="sug-option">
+    <input type="radio" name="sug" value="butterfly">
+    <div class="sug-label">
+      <span class="sug-name">Butterflies (general)</span>
+      <span class="sug-sci">Papilionoidea</span>
+    </div></label>`;
+  html += `<label class="sug-option">
+    <input type="radio" name="sug" value="none">
+    <div class="sug-label">
+      <span class="sug-name" style="color:var(--muted)">No identification</span>
+    </div></label>`;
+
+  opts.innerHTML = html;
+  opts.classList.remove('hidden');
+  // Pre-select first suggestion if any
+  if(sug.length > 0){
+    opts.querySelector('input[type=radio]').checked = true;
+  }
+}
+
+async function applySuggest(){
+  const chosen = document.querySelector('input[name=sug]:checked');
+  if(!chosen){ alert('Pick an option.'); return; }
+
+  let species = null;
+  const v = chosen.value;
+  if(v === 'none'){
+    species = null;
+  } else if(v === 'butterfly'){
+    species = {...BUTTERFLY_TAXON};
+  } else {
+    species = suggestCache[parseInt(v)] || null;
+    if(species) species = {...species, source:'manual'};
+  }
+
+  await fetch('/api/set_species',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({index: suggestIdx, species}),
+  });
+  records[suggestIdx].species = species;
+  refreshCard(suggestIdx);
+  closeSuggest();
+}
+
+function closeSuggest(){
+  document.getElementById('suggest-modal').classList.add('hidden');
+}
+
+// ── Crop canvas ───────────────────────────────────────
+function openCrop(i,ev){
+  ev.stopPropagation();
+  cropIdx=i; cropRect=null; cropStart=null; isDragging=false;
+  const modal=document.getElementById('crop-modal');
+  modal.classList.remove('hidden');
+
+  const canvas=document.getElementById('crop-canvas');
+  const img=new Image();
+  img.onload=()=>{
+    naturalW=img.naturalWidth; naturalH=img.naturalHeight;
+    // Scale to fit within 80vw × 70vh
+    const maxW=Math.min(window.innerWidth*0.80,900);
+    const maxH=window.innerHeight*0.68;
+    const scale=Math.min(maxW/naturalW,maxH/naturalH,1);
+    canvas.width=Math.round(naturalW*scale);
+    canvas.height=Math.round(naturalH*scale);
+    canvas._scale=scale;
+    const ctx=canvas.getContext('2d');
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+  };
+  img.src='/api/image?path='+encodeURIComponent(records[i].source);
+}
+
+function closeCrop(){document.getElementById('crop-modal').classList.add('hidden');}
+
+function canvasPos(e){
+  const c=document.getElementById('crop-canvas');
+  const r=c.getBoundingClientRect();
+  const src=e.touches?e.touches[0]:e;
+  return {x:src.clientX-r.left,y:src.clientY-r.top};
+}
+
+function drawCanvas(){
+  const c=document.getElementById('crop-canvas');
+  const ctx=c.getContext('2d');
+  // Redraw image (store it in offscreen if needed, but canvas keeps it)
+  ctx.clearRect(0,0,c.width,c.height);
+  // Re-draw source image
+  const img=new Image();
+  img.onload=()=>{
+    ctx.drawImage(img,0,0,c.width,c.height);
+    if(cropRect){
+      ctx.fillStyle='rgba(0,0,0,0.45)';
+      ctx.fillRect(0,0,c.width,c.height);
+      const{x,y,w,h}=cropRect;
+      ctx.clearRect(x,y,w,h);
+      ctx.strokeStyle='#6c8eff';
+      ctx.lineWidth=2;
+      ctx.setLineDash([5,3]);
+      ctx.strokeRect(x,y,w,h);
+    }
+  };
+  img.src='/api/image?path='+encodeURIComponent(records[cropIdx].source);
+}
+
+const cv=()=>document.getElementById('crop-canvas');
+
+cv().addEventListener('mousedown',e=>{cropStart=canvasPos(e);isDragging=true;});
+cv().addEventListener('touchstart',e=>{e.preventDefault();cropStart=canvasPos(e);isDragging=true;},{passive:false});
+
+function squareRect(start, p){
+  const dx = p.x - start.x, dy = p.y - start.y;
+  const side = Math.min(Math.abs(dx), Math.abs(dy));
+  return {
+    x: dx >= 0 ? start.x : start.x - side,
+    y: dy >= 0 ? start.y : start.y - side,
+    w: side, h: side,
+  };
+}
+
+cv().addEventListener('mousemove',e=>{
+  if(!isDragging||!cropStart)return;
+  cropRect=squareRect(cropStart,canvasPos(e));
+  drawCanvas();
+});
+cv().addEventListener('touchmove',e=>{
+  e.preventDefault();
+  if(!isDragging||!cropStart)return;
+  cropRect=squareRect(cropStart,canvasPos(e));
+  drawCanvas();
+},{passive:false});
+
+cv().addEventListener('mouseup',()=>{isDragging=false;});
+cv().addEventListener('touchend',()=>{isDragging=false;});
+
+async function applyCrop(){
+  if(!cropRect||cropRect.w<5||cropRect.h<5){alert('Draw a selection first.');return;}
+  const scale=cv()._scale||1;
+  const x1=Math.round(cropRect.x/scale), y1=Math.round(cropRect.y/scale);
+  const x2=Math.round((cropRect.x+cropRect.w)/scale);
+  const y2=Math.round((cropRect.y+cropRect.h)/scale);
+
+  const resp=await fetch('/api/recrop',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({index:cropIdx,x1,y1,x2,y2}),
+  });
+  const data=await resp.json();
+  if(data.error){alert('Crop failed: '+data.error);return;}
+
+  closeCrop();
+  // Refresh the card thumbnail with a cache-bust
+  records[cropIdx].cropped=data.cropped;
+  refreshCard(cropIdx);
+}
+
+// ── Upload ────────────────────────────────────────────
+async function doUpload(dryRun){
+  document.getElementById('btn-upload').disabled=true;
+  document.getElementById('btn-dryrun').disabled=true;
+  const description=document.getElementById('description').value.trim();
+  const resp=await fetch('/api/upload',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({indices:Array.from(selected),dry_run:dryRun,description,tags:[]}),
+  });
+  const results=await resp.json();
+  if(results.error){alert('Upload error: '+results.error);updateSelCount();return;}
+  renderResults(results,dryRun);
+  show('result-card'); hide('grid-card');
+}
+
+function renderResults(results,dryRun){
+  const ok=results.filter(r=>r.status==='ok').length;
+  const errs=results.filter(r=>r.status==='error').length;
+  let html=`<p style="margin-bottom:12px;color:var(--muted)">${dryRun?'Dry run — nothing was sent. ':''}`
+           +`${ok} uploaded, ${errs} failed.</p>`;
+  html+=`<table class="result-table"><thead><tr><th>File</th><th>Species</th><th>Status</th><th>Link</th></tr></thead><tbody>`;
+  for(const r of results){
+    const sp=r.species;
+    const spLabel=sp?(sp.common_name||sp.name||'—')+` (cv:${sp.score.toFixed(2)})`:'—';
+    const pill=r.status==='ok'?'pill-ok':r.status==='dry_run'?'pill-dry':'pill-err';
+    const pillTxt=r.status==='ok'?'uploaded':r.status==='dry_run'?'dry run':'error';
+    const link=r.url?`<a class="obs-url" href="${r.url}" target="_blank">view ↗</a>`:(r.error||'');
+    const fname=(r.file||r.source||'').split('/').pop();
+    html+=`<tr><td>${fname}</td><td>${spLabel}</td><td><span class="pill ${pill}">${pillTxt}</span></td><td>${link}</td></tr>`;
+  }
+  html+='</tbody></table>';
+  document.getElementById('result-body').innerHTML=html;
+}
+
+function appendLog(msg,cls){
+  const box=document.getElementById('log-box');
+  const el=document.createElement('div');
+  el.textContent=msg; if(cls)el.className=cls;
+  box.appendChild(el); box.scrollTop=box.scrollHeight;
+}
+
+function resetAll(){
+  clearInterval(pollTimer); records=[]; selected=new Set(); lastLogLen=0;
+  setBadge('idle'); document.getElementById('btn-process').disabled=false;
+  document.getElementById('log-box').innerHTML='';
+  document.getElementById('grid').innerHTML='';
+  hide('log-card'); hide('grid-card'); hide('result-card');
+}
+
+function show(id){document.getElementById(id).classList.remove('hidden');}
+function hide(id){document.getElementById(id).classList.add('hidden');}
+</script>
+</body>
+</html>

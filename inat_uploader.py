@@ -76,8 +76,9 @@ def _retry_upload(cropped_path: Path, payload: dict, access_token: str, max_atte
                 photos=[str(cropped_path)],
                 access_token=access_token,
             )
-            obs_id = response[0]["id"]
-            url = f"https://www.inaturalist.org/observations/{obs_id}"
+            obs = response[0] if isinstance(response, list) else response
+            obs_id = obs["id"]
+            url = obs.get("uri", f"https://www.inaturalist.org/observations/{obs_id}")
             return {"status": "ok", "file": cropped_path.name, "obs_id": obs_id, "url": url}
         except Exception as e:
             status = getattr(getattr(e, "response", None), "status_code", None)

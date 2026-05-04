@@ -121,7 +121,7 @@ def upload(
 
     # ── 4. Attach datetime and trip coordinates to every record ───────────────
     for record in active_records:
-        record["datetime"] = get_photo_datetime(record["source"])
+        record["datetime"], record["has_time"] = get_photo_datetime(record["source"])
         record["lat"] = lat
         record["lon"] = lon
 

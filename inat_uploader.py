@@ -63,13 +63,18 @@ def upload_observation(
     tags: list[str] | None = None,
     description: str = "",
     dry_run: bool = False,
+    has_time: bool = True,
+    tz_offset: str = "+08:00",
 ) -> dict:
+    if has_time:
+        observed_on_string = observed_dt.strftime("%Y-%m-%dT%H:%M:%S") + tz_offset
+    else:
+        observed_on_string = observed_dt.strftime("%Y-%m-%d")
+
     payload = dict(
-        observed_on=observed_dt.strftime("%Y-%m-%d"),
-        time_observed_at=observed_dt.strftime("%H:%M:%S"),
+        observed_on_string=observed_on_string,
         latitude=lat,
         longitude=lon,
-        positional_accuracy=1000,
         geoprivacy="obscured",
         description=description,
         tag_list=tags or [],
@@ -131,6 +136,7 @@ def upload_batch(
             species_info: dict | None = record.get("species")
             taxon_id: int | None = species_info.get("taxon_id") if species_info else None
 
+            has_time: bool = record.get("has_time", True)
             progress.update(task, description=f"Uploading {cropped_path.name}")
             try:
                 result = upload_observation(
@@ -143,6 +149,7 @@ def upload_batch(
                     tags=tags,
                     description=description,
                     dry_run=dry_run,
+                    has_time=has_time,
                 )
                 result["species"] = species_info
             except Exception as e:

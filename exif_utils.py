@@ -32,12 +32,20 @@ def get_exif_datetime(image_path: Path) -> datetime | None:
     return None
 
 
-def get_photo_datetime(image_path: Path) -> datetime:
+def get_exif_tz_offset(image_path: Path) -> str | None:
+    exif = _get_raw_exif(image_path)
+    if not exif:
+        return None
+    return exif.get("OffsetTimeOriginal") or exif.get("OffsetTime") or None
+
+
+def get_photo_datetime(image_path: Path) -> tuple[datetime, bool]:
+    """Return (datetime, has_time). has_time is False when only the date is known (no EXIF time)."""
     dt = get_exif_datetime(image_path)
     if dt:
-        return dt
+        return dt, True
     mtime = os.path.getmtime(image_path)
-    return datetime.fromtimestamp(mtime)
+    return datetime.fromtimestamp(mtime), False
 
 
 def get_exif_gps(image_path: Path) -> tuple[float, float] | None:

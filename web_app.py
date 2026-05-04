@@ -54,7 +54,7 @@ def _process(
     skip_yolo: bool,
 ) -> None:
     from crop_photos import batch_crop, get_supported_photos, load_yolo_model
-    from exif_utils import get_photo_datetime
+    from exif_utils import get_photo_datetime, get_exif_tz_offset
     from inat_uploader import get_token
     from location_utils import resolve_location
     from species_utils import get_species_suggestion
@@ -94,7 +94,8 @@ def _process(
             _log(f"Cropped {len(active)} photo(s)")
 
         for record in active:
-            record["datetime"] = get_photo_datetime(record["source"])
+            record["datetime"], record["has_time"] = get_photo_datetime(record["source"])
+            record["tz_offset"] = get_exif_tz_offset(record["source"])
             record["lat"] = lat
             record["lon"] = lon
 
@@ -138,6 +139,8 @@ def _serialize(r: dict) -> dict:
         "source": str(r["source"]),
         "cropped": str(r["cropped"]),
         "datetime": dt.isoformat() if dt else None,
+        "has_time": r.get("has_time", True),
+        "tz_offset": r.get("tz_offset"),
         "lat": r["lat"],
         "lon": r["lon"],
         "fallback": r.get("fallback", False),
@@ -373,17 +376,46 @@ def api_receive_photos():
     return jsonify({"ok": True, "path": str(_UPLOAD_DIR.resolve()), "count": saved})
 
 
+@app.route("/api/set_token", methods=["POST"])
+def api_set_token():
+    """Write a new INAT_API_TOKEN into .env so it takes effect immediately."""
+    data = request.json or {}
+    token = data.get("token", "").strip()
+    if not token:
+        return jsonify({"error": "token is required"}), 400
+
+    env_file = Path(__file__).parent / ".env"
+    try:
+        if env_file.exists():
+            lines = env_file.read_text().splitlines(keepends=True)
+            updated = False
+            for i, line in enumerate(lines):
+                if line.startswith("INAT_API_TOKEN="):
+                    lines[i] = f'INAT_API_TOKEN="{token}"\n'
+                    updated = True
+                    break
+            if not updated:
+                lines.append(f'INAT_API_TOKEN="{token}"\n')
+            env_file.write_text("".join(lines))
+        else:
+            env_file.write_text(f'INAT_API_TOKEN="{token}"\n')
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"ok": True})
+
+
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     from inat_uploader import get_token, upload_observation
 
     data = request.json or {}
-    indices      = data.get("indices", [])
-    dry_run      = data.get("dry_run", False)
-    tags         = data.get("tags", [])
-    description  = data.get("description", "")
-    delete_after = data.get("delete_after", False)
-
+    indices        = data.get("indices", [])
+    dry_run        = data.get("dry_run", False)
+    tags           = data.get("tags", [])
+    description    = data.get("description", "")
+    delete_after   = data.get("delete_after", False)
+    browser_offset = data.get("tz_offset", "+08:00")
     with _lock:
         records = list(_job["records"])
 
@@ -401,6 +433,7 @@ def api_upload():
         dt = datetime.fromisoformat(rec["datetime"]) if rec["datetime"] else datetime.now()
         species = rec.get("species")
         taxon_id = species.get("taxon_id") if species else None
+        tz = rec.get("tz_offset") or browser_offset
         try:
             result = upload_observation(
                 cropped_path=Path(rec["cropped"]),
@@ -412,12 +445,17 @@ def api_upload():
                 tags=tags,
                 description=description,
                 dry_run=dry_run,
+                has_time=rec.get("has_time", True),
+                tz_offset=tz,
             )
             result["source"] = rec["source"]
             result["species"] = species
             if delete_after and result["status"] == "ok":
                 try:
                     Path(rec["source"]).unlink(missing_ok=True)
+                    cropped = Path(rec["cropped"])
+                    if cropped.resolve() != Path(rec["source"]).resolve():
+                        cropped.unlink(missing_ok=True)
                     result["deleted"] = True
                 except Exception:
                     result["deleted"] = False

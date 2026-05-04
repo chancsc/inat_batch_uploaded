@@ -108,6 +108,7 @@
   <h1>iNat Batch Uploader</h1>
   <div style="flex:1"></div>
   <span id="status-badge">idle</span>
+  <button class="btn-outline btn-sm" onclick="openToken()" style="margin-left:10px">API Token</button>
 </header>
 
 <!-- Crop modal -->
@@ -120,6 +121,34 @@
       <div class="btn-row">
         <button class="btn-primary btn-sm" onclick="applyCrop()">Apply crop</button>
         <button class="btn-outline btn-sm" onclick="closeCrop()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Token modal -->
+<div id="token-modal" class="hidden">
+  <div class="modal-backdrop" onclick="closeToken()">
+    <div class="modal-box" onclick="event.stopPropagation()" style="max-width:480px;width:95vw">
+      <h3>iNaturalist API Token</h3>
+      <p style="font-size:.83rem;color:var(--muted);margin:8px 0 14px">
+        Get a fresh token at
+        <a href="https://www.inaturalist.org/users/api_token" target="_blank" rel="noopener"
+           style="color:var(--accent)">inaturalist.org → Account → API Token</a>.
+        Tokens expire roughly every 24 hours.
+      </p>
+      <div class="field">
+        <label>Paste new token</label>
+        <input type="password" id="token-input" placeholder="eyJhbGci…" style="font-family:monospace;font-size:.78rem">
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <input type="checkbox" id="token-show" onchange="document.getElementById('token-input').type=this.checked?'text':'password'">
+          <label for="token-show" style="font-size:.8rem;cursor:pointer">Show token</label>
+        </div>
+      </div>
+      <div id="token-msg" style="font-size:.82rem;margin-bottom:8px"></div>
+      <div class="btn-row">
+        <button class="btn-primary btn-sm" onclick="saveToken()">Save to .env</button>
+        <button class="btn-outline btn-sm" onclick="closeToken()">Cancel</button>
       </div>
     </div>
   </div>
@@ -458,6 +487,27 @@ function closeSuggest(){
   document.getElementById('suggest-modal').classList.add('hidden');
 }
 
+// ── Token modal ───────────────────────────────────────
+function openToken(){
+  document.getElementById('token-input').value='';
+  document.getElementById('token-msg').textContent='';
+  document.getElementById('token-modal').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('token-input').focus(),100);
+}
+function closeToken(){
+  document.getElementById('token-modal').classList.add('hidden');
+}
+async function saveToken(){
+  const tok=document.getElementById('token-input').value.trim();
+  const msg=document.getElementById('token-msg');
+  if(!tok){msg.style.color='var(--err)';msg.textContent='Token cannot be empty.';return;}
+  msg.style.color='var(--muted)';msg.textContent='Saving…';
+  const r=await fetch('/api/set_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok})});
+  const d=await r.json();
+  if(d.ok){msg.style.color='var(--accent2)';msg.textContent='Saved! Token is now active.';setTimeout(closeToken,1500);}
+  else{msg.style.color='var(--err)';msg.textContent='Error: '+(d.error||'unknown');}
+}
+
 // ── Crop canvas ───────────────────────────────────────
 const HS = 10; // handle half-size in px
 
@@ -540,11 +590,13 @@ function drawCanvas(){
   img.onload=()=>{
     ctx.drawImage(img,0,0,c.width,c.height);
     if(!cropRect)return;
-    // dim outside selection
-    ctx.fillStyle='rgba(0,0,0,0.12)';
-    ctx.fillRect(0,0,c.width,c.height);
     const{x,y,w,h}=cropRect;
-    ctx.clearRect(x,y,w,h);
+    // dim the 4 regions outside the crop box (preserve image inside)
+    ctx.fillStyle='rgba(0,0,0,0.35)';
+    ctx.fillRect(0,0,c.width,y);
+    ctx.fillRect(0,y+h,c.width,c.height-(y+h));
+    ctx.fillRect(0,y,x,h);
+    ctx.fillRect(x+w,y,c.width-(x+w),h);
     // border
     ctx.strokeStyle='#6c8eff';
     ctx.lineWidth=1.5;
@@ -626,6 +678,13 @@ async function applyCrop(){
   refreshCard(cropIdx);
 }
 
+function tzOffset(){
+  const off=-new Date().getTimezoneOffset();
+  const h=String(Math.floor(Math.abs(off)/60)).padStart(2,'0');
+  const m=String(Math.abs(off)%60).padStart(2,'0');
+  return (off>=0?'+':'-')+h+':'+m;
+}
+
 // ── Upload ────────────────────────────────────────────
 async function doUpload(dryRun){
   document.getElementById('btn-upload').disabled=true;
@@ -634,7 +693,7 @@ async function doUpload(dryRun){
   const deleteAfter=!dryRun&&document.getElementById('delete-after').checked;
   const resp=await fetch('/api/upload',{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({indices:Array.from(selected),dry_run:dryRun,description,tags:[],delete_after:deleteAfter}),
+    body:JSON.stringify({indices:Array.from(selected),dry_run:dryRun,description,tags:[],delete_after:deleteAfter,tz_offset:tzOffset()}),
   });
   const results=await resp.json();
   if(results.error){alert('Upload error: '+results.error);updateSelCount();return;}

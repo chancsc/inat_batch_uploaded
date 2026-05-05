@@ -100,6 +100,10 @@
   #status-badge.done{background:#14532d;color:var(--accent2);}
   #status-badge.error{background:#450a0a;color:var(--err);}
   #sel-count{color:var(--muted);font-size:.85rem;}
+  .loc-item{padding:9px 12px;font-size:.87rem;cursor:pointer;border-bottom:1px solid var(--border);}
+  .loc-item:last-child{border-bottom:none;}
+  .loc-item:hover,.loc-item.active{background:var(--border);}
+  .loc-item small{color:var(--muted);font-size:.75rem;display:block;}
 </style>
 </head>
 <body>
@@ -183,9 +187,13 @@
         <label for="photo-files" id="file-label">📁 Choose photos or drag &amp; drop</label>
       </div>
     </div>
-    <div class="field">
+    <div class="field" style="position:relative">
       <label>Trip location</label>
-      <input type="text" id="location" placeholder="Hulu Langat  or  3.08, 101.83">
+      <input type="text" id="location" placeholder="Hulu Langat  or  3.08, 101.83"
+             autocomplete="off" oninput="filterLocations()" onblur="hideLocDrop()" onfocus="filterLocations()">
+      <div id="loc-drop" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;
+           background:var(--surface);border:1px solid var(--border);border-radius:6px;
+           max-height:180px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.4)"></div>
     </div>
   </div>
   <div class="row">
@@ -249,6 +257,45 @@
 <script>
 let records = [];
 let selected = new Set();
+
+// ── Location autocomplete ─────────────────────────────
+let _locCache = [];
+(async()=>{
+  try{
+    const r=await fetch('/api/locations');
+    _locCache=await r.json();
+  }catch(e){}
+})();
+
+function filterLocations(){
+  const inp=document.getElementById('location');
+  const drop=document.getElementById('loc-drop');
+  const q=inp.value.trim().toLowerCase();
+  const matches=q.length===0
+    ? _locCache
+    : _locCache.filter(e=>e.name.toLowerCase().includes(q));
+  if(!matches.length){drop.style.display='none';return;}
+  drop.innerHTML=matches.map((e,i)=>
+    `<div class="loc-item" data-i="${i}" onmousedown="pickLoc(${i})">
+       ${e.name}<small>${e.lat.toFixed(5)}, ${e.lon.toFixed(5)}</small>
+     </div>`
+  ).join('');
+  drop.style.display='block';
+}
+
+function pickLoc(i){
+  const e=_locCache.filter(x=>{
+    const q=document.getElementById('location').value.trim().toLowerCase();
+    return q.length===0||x.name.toLowerCase().includes(q);
+  })[i];
+  if(!e)return;
+  document.getElementById('location').value=e.name;
+  document.getElementById('loc-drop').style.display='none';
+}
+
+function hideLocDrop(){
+  setTimeout(()=>document.getElementById('loc-drop').style.display='none',150);
+}
 let pollTimer = null;
 let lastLogLen = 0;
 let droppedFiles = null;  // files from drag-and-drop

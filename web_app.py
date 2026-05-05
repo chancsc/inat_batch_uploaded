@@ -376,6 +376,13 @@ def api_receive_photos():
     return jsonify({"ok": True, "path": str(_UPLOAD_DIR.resolve()), "count": saved})
 
 
+@app.route("/api/locations")
+def api_locations():
+    """Return cached place-name → coordinates entries."""
+    from location_utils import list_cached
+    return jsonify(list_cached())
+
+
 @app.route("/api/set_token", methods=["POST"])
 def api_set_token():
     """Write a new INAT_API_TOKEN into .env so it takes effect immediately."""

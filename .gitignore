@@ -10,3 +10,4 @@ output/
 dist/
 .venv/
 venv/
+.location_cache.json

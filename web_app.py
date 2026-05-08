@@ -324,6 +324,12 @@ def api_suggest():
                 token=token,
                 top_n=top_n,
             )
+            # Append genus of top result as an extra option
+            from species_utils import lookup_genus
+            if suggestions and suggestions[0].get("name"):
+                genus = lookup_genus(suggestions[0]["name"])
+                if genus:
+                    suggestions.append(genus)
             return jsonify({"suggestions": suggestions})
         except Exception as e:
             if _is_401(e):

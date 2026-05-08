@@ -475,14 +475,24 @@ async function reidentifyOne(i, ev){
   const sug = suggestCache;
   let html = '';
   sug.forEach((s,k)=>{
-    const sc = s.score >= 0.60 ? 'score-hi' : 'score-lo';
-    const pct = (s.score*100).toFixed(1);
+    if(s.source === 'genus'){
+      html += '<div class="sug-divider"></div>';
+      html += `<label class="sug-option">
+        <input type="radio" name="sug" value="${k}">
+        <div class="sug-label">
+          <span class="sug-name">${s.common_name || s.name}</span>
+          <span class="sug-sci">${s.name} <em style="color:var(--muted)">(genus)</em></span>
+        </div></label>`;
+      return;
+    }
+    const sc = s.score != null && s.score >= 0.60 ? 'score-hi' : 'score-lo';
+    const scoreStr = s.score != null ? `${(s.score*100).toFixed(1)}% confidence` : '';
     html += `<label class="sug-option">
       <input type="radio" name="sug" value="${k}">
       <div class="sug-label">
         <span class="sug-name">${s.common_name || s.name}</span>
         ${s.common_name ? `<span class="sug-sci">${s.name}</span>` : ''}
-        <span class="sug-score ${sc}">${pct}% confidence</span>
+        ${scoreStr ? `<span class="sug-score ${sc}">${scoreStr}</span>` : ''}
       </div></label>`;
   });
   html += '<div class="sug-divider"></div>';

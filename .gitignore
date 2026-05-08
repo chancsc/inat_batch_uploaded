@@ -11,3 +11,4 @@ dist/
 .venv/
 venv/
 .location_cache.json
+uploaded_photos/

@@ -35,6 +35,32 @@ def query_inat_cv(
     return suggestions
 
 
+def lookup_genus(species_name: str) -> dict | None:
+    """Return genus-level taxon dict for the first word of a binomial name."""
+    parts = species_name.strip().split()
+    if len(parts) < 2:
+        return None
+    genus_name = parts[0]
+    import pyinaturalist
+    try:
+        response = pyinaturalist.get_taxa(q=genus_name, rank="genus", per_page=1)
+        results = response.get("results", [])
+        if not results:
+            return None
+        taxon = results[0]
+        if taxon.get("name", "").lower() != genus_name.lower():
+            return None
+        return {
+            "taxon_id": taxon["id"],
+            "name": taxon.get("name", genus_name),
+            "common_name": taxon.get("preferred_common_name", ""),
+            "score": None,
+            "source": "genus",
+        }
+    except Exception:
+        return None
+
+
 def get_species_from_yolo(class_name: str, token: str) -> dict | None:
     import pyinaturalist
     clean_name = class_name.replace("_", " ").strip()

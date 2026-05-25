@@ -57,10 +57,18 @@ Get your API token at **inaturalist.org → Account Settings → scroll to Appli
 ### Web UI (recommended)
 
 ```bash
-bash run_web.sh
+bash healthcheck.sh --restart
 ```
 
 This starts Flask on port 5000 and opens a Cloudflare tunnel. The public URL is printed to the terminal — open it on any device.
+
+**Managing the app:**
+
+| Command | Action |
+|---|---|
+| `bash healthcheck.sh` | Show status of Flask and tunnel |
+| `bash healthcheck.sh --fix` | Restart only broken or stalled services |
+| `bash healthcheck.sh --restart` | Stop and restart everything |
 
 **Workflow:**
 
@@ -100,7 +108,7 @@ location_utils.py   Place name → coordinates
 preview_ui.py       Textual TUI (CLI mode)
 templates/
   index.html        Web UI (single-page)
-run_web.sh          Start Flask + Cloudflare tunnel
+healthcheck.sh      Start, fix, or restart Flask + Cloudflare tunnel
 run.sh              Start CLI tool
 setup.sh            Create venv and install dependencies
 ```

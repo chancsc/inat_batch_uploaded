@@ -748,14 +748,47 @@ async function doUpload(dryRun){
   document.getElementById('btn-dryrun').disabled=true;
   const description=document.getElementById('description').value.trim();
   const deleteAfter=!dryRun&&document.getElementById('delete-after').checked;
+
+  show('log-card'); hide('result-card');
+  document.getElementById('log-card').scrollIntoView({behavior:'smooth', block:'start'});
+  appendLog(`── Uploading ${selected.size} photo(s)${dryRun?' (dry run)':''} ──`);
+  lastLogLen=0; setBadge('processing');
+
   const resp=await fetch('/api/upload',{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({indices:Array.from(selected),dry_run:dryRun,description,tags:[],delete_after:deleteAfter,tz_offset:tzOffset()}),
   });
-  const results=await resp.json();
-  if(results.error){alert('Upload error: '+results.error);updateSelCount();return;}
-  renderResults(results,dryRun);
-  show('result-card'); hide('grid-card');
+  const data=await resp.json();
+  if(data.error){
+    appendLog('Upload error: '+data.error,'log-err');setBadge('error');
+    document.getElementById('btn-upload').disabled=false;
+    document.getElementById('btn-dryrun').disabled=false;
+    return;
+  }
+  pollTimer=setInterval(()=>pollUploadStatus(dryRun),1000);
+}
+
+async function pollUploadStatus(dryRun){
+  const resp=await fetch('/api/upload_status');
+  const data=await resp.json();
+  const box=document.getElementById('log-box');
+  for(let i=lastLogLen;i<data.progress.length;i++){
+    const line=data.progress[i];
+    const cls=line.startsWith('Done')?'log-done':line.startsWith('Error')||line.includes('Error:')||line.includes('Traceback')?'log-err':'';
+    const el=document.createElement('div');
+    el.textContent=line; if(cls)el.className=cls;
+    box.appendChild(el); box.scrollTop=box.scrollHeight;
+  }
+  lastLogLen=data.progress.length;
+  if(data.status==='done'){
+    clearInterval(pollTimer);setBadge('done');
+    renderResults(data.results,dryRun);
+    show('result-card'); hide('grid-card');
+  } else if(data.status==='error'){
+    clearInterval(pollTimer);setBadge('error');
+    document.getElementById('btn-upload').disabled=false;
+    document.getElementById('btn-dryrun').disabled=false;
+  }
 }
 
 function renderResults(results,dryRun){

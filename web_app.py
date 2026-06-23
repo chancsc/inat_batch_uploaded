@@ -19,6 +19,14 @@ app.secret_key = os.urandom(24)
 _job: dict = {"status": "idle", "progress": [], "records": [], "error": None}
 _lock = threading.Lock()
 
+_upload_job: dict = {"status": "idle", "progress": [], "results": [], "error": None}
+_upload_lock = threading.Lock()
+
+
+def _upload_log(msg: str) -> None:
+    with _upload_lock:
+        _upload_job["progress"].append(msg)
+
 
 def _inat_token() -> str:
     """Return a valid token, refreshing once if the cached one is stale."""
@@ -418,10 +426,71 @@ def api_set_token():
     return jsonify({"ok": True})
 
 
-@app.route("/api/upload", methods=["POST"])
-def api_upload():
+def _do_upload(selected, dry_run, tags, description, delete_after, browser_offset):
     from inat_uploader import get_token, upload_observation
 
+    try:
+        with _upload_lock:
+            _upload_job["status"] = "uploading"
+
+        _upload_log("Authenticating with iNaturalist...")
+        token = get_token()
+
+        results = []
+        for i, rec in enumerate(selected):
+            _upload_log(f"  [{i+1}/{len(selected)}] {Path(rec['source']).name}")
+            dt = datetime.fromisoformat(rec["datetime"]) if rec["datetime"] else datetime.now()
+            species = rec.get("species")
+            taxon_id = species.get("taxon_id") if species else None
+            tz = rec.get("tz_offset") or browser_offset
+            try:
+                result = upload_observation(
+                    cropped_path=Path(rec["cropped"]),
+                    observed_dt=dt,
+                    lat=rec["lat"],
+                    lon=rec["lon"],
+                    taxon_id=taxon_id,
+                    access_token=token,
+                    tags=tags,
+                    description=description,
+                    dry_run=dry_run,
+                    has_time=rec.get("has_time", True),
+                    tz_offset=tz,
+                )
+                result["source"] = rec["source"]
+                result["species"] = species
+                if delete_after and result["status"] == "ok":
+                    try:
+                        Path(rec["source"]).unlink(missing_ok=True)
+                        cropped = Path(rec["cropped"])
+                        if cropped.resolve() != Path(rec["source"]).resolve():
+                            cropped.unlink(missing_ok=True)
+                        result["deleted"] = True
+                    except Exception:
+                        result["deleted"] = False
+                if result["status"] == "error":
+                    _upload_log(f"    Error: {result.get('error')}")
+            except Exception as e:
+                result = {"status": "error", "file": rec["source"], "error": str(e), "species": species}
+                _upload_log(f"    Error: {e}")
+            results.append(result)
+
+        with _upload_lock:
+            _upload_job["results"] = results
+            _upload_job["status"] = "done"
+        _upload_log("Done!")
+
+    except Exception as e:
+        import traceback
+        with _upload_lock:
+            _upload_job["status"] = "error"
+            _upload_job["error"] = str(e)
+        _upload_log(f"Error: {e}")
+        _upload_log(traceback.format_exc())
+
+
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
     data = request.json or {}
     indices        = data.get("indices", [])
     dry_run        = data.get("dry_run", False)
@@ -436,47 +505,26 @@ def api_upload():
     if not selected:
         return jsonify({"error": "No records selected"}), 400
 
-    try:
-        token = get_token()
-    except Exception as e:
-        return jsonify({"error": f"Auth failed: {e}"}), 500
+    with _upload_lock:
+        _upload_job.update(status="idle", progress=[], results=[], error=None)
 
-    results = []
-    for rec in selected:
-        dt = datetime.fromisoformat(rec["datetime"]) if rec["datetime"] else datetime.now()
-        species = rec.get("species")
-        taxon_id = species.get("taxon_id") if species else None
-        tz = rec.get("tz_offset") or browser_offset
-        try:
-            result = upload_observation(
-                cropped_path=Path(rec["cropped"]),
-                observed_dt=dt,
-                lat=rec["lat"],
-                lon=rec["lon"],
-                taxon_id=taxon_id,
-                access_token=token,
-                tags=tags,
-                description=description,
-                dry_run=dry_run,
-                has_time=rec.get("has_time", True),
-                tz_offset=tz,
-            )
-            result["source"] = rec["source"]
-            result["species"] = species
-            if delete_after and result["status"] == "ok":
-                try:
-                    Path(rec["source"]).unlink(missing_ok=True)
-                    cropped = Path(rec["cropped"])
-                    if cropped.resolve() != Path(rec["source"]).resolve():
-                        cropped.unlink(missing_ok=True)
-                    result["deleted"] = True
-                except Exception:
-                    result["deleted"] = False
-        except Exception as e:
-            result = {"status": "error", "file": rec["source"], "error": str(e), "species": species}
-        results.append(result)
+    threading.Thread(
+        target=_do_upload,
+        args=(selected, dry_run, tags, description, delete_after, browser_offset),
+        daemon=True,
+    ).start()
+    return jsonify({"ok": True})
 
-    return jsonify(results)
+
+@app.route("/api/upload_status")
+def api_upload_status():
+    with _upload_lock:
+        return jsonify({
+            "status": _upload_job["status"],
+            "progress": list(_upload_job["progress"]),
+            "results": _upload_job["results"],
+            "error": _upload_job["error"],
+        })
 
 
 if __name__ == "__main__":

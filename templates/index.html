@@ -381,9 +381,9 @@ function cardHtml(rec,i){
   const imgUrl='/api/image?path='+encodeURIComponent(rec.cropped)+'&t='+Date.now();
   let spHtml='<div class="obs-species" style="color:var(--muted)">[unknown]</div>';
   if(sp){
-    const sc=(sp.score!=null&&sp.score>=0.60)?'score-hi':'score-lo';
+    const sc=(sp.score!=null&&sp.score>=60)?'score-hi':'score-lo';
     const w=sp.low_confidence?' ⚠':'';
-    const scoreStr=sp.score!=null?`cv: ${sp.score.toFixed(2)}${w}`:'';
+    const scoreStr=sp.score!=null?`cv: ${sp.score.toFixed(1)}%${w}`:'';
     spHtml=`<div class="obs-species">${sp.common_name||sp.name||'—'}</div>
             <div class="obs-common">${sp.common_name?sp.name:''}</div>
             ${scoreStr?`<div class="obs-score ${sc}">${scoreStr}</div>`:''}`;
@@ -485,8 +485,8 @@ async function reidentifyOne(i, ev){
         </div></label>`;
       return;
     }
-    const sc = s.score != null && s.score >= 0.60 ? 'score-hi' : 'score-lo';
-    const scoreStr = s.score != null ? `${(s.score*100).toFixed(1)}% confidence` : '';
+    const sc = s.score != null && s.score >= 60 ? 'score-hi' : 'score-lo';
+    const scoreStr = s.score != null ? `${s.score.toFixed(1)}% confidence` : '';
     html += `<label class="sug-option">
       <input type="radio" name="sug" value="${k}">
       <div class="sug-label">
@@ -822,6 +822,9 @@ function resetAll(){
   setBadge('idle'); document.getElementById('btn-process').disabled=false;
   document.getElementById('log-box').innerHTML='';
   document.getElementById('grid').innerHTML='';
+  document.getElementById('file-label').textContent='📁 Choose photos or drag & drop';
+  document.getElementById('photo-files').value='';
+  droppedFiles=null;
   hide('log-card'); hide('grid-card'); hide('result-card');
 }
 

@@ -351,6 +351,27 @@ def api_suggest():
     return jsonify({"error": "Auth failed after token refresh"}), 500
 
 
+@app.route("/api/set_date_all", methods=["POST"])
+def api_set_date_all():
+    """Overwrite the date (year/month/day) on every record, keeping each record's own time-of-day."""
+    data = request.json or {}
+    date_str = data.get("date", "").strip()
+    try:
+        new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"error": "date must be in YYYY-MM-DD format"}), 400
+
+    updated = {}
+    with _lock:
+        for i, rec in enumerate(_job["records"]):
+            dt = datetime.fromisoformat(rec["datetime"]) if rec["datetime"] else datetime.now()
+            new_dt = dt.replace(year=new_date.year, month=new_date.month, day=new_date.day)
+            rec["datetime"] = new_dt.isoformat()
+            updated[i] = rec["datetime"]
+
+    return jsonify({"ok": True, "updated": updated})
+
+
 @app.route("/api/set_species", methods=["POST"])
 def api_set_species():
     """Manually set (or clear) the species for a record."""

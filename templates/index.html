@@ -20,7 +20,7 @@
   .card h2{font-size:.85rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:14px;}
   .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
   label{font-size:.82rem;color:var(--muted);}
-  input[type=text],input[type=number]{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:9px 12px;font-size:.9rem;width:100%;outline:none;transition:border-color .15s;}
+  input[type=text],input[type=number],input[type=date]{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:9px 12px;font-size:.9rem;width:100%;outline:none;transition:border-color .15s;}
   input:focus{border-color:var(--accent);}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   @media(max-width:520px){.row{grid-template-columns:1fr;}}
@@ -227,6 +227,10 @@
     <button class="btn-outline btn-sm" onclick="selectNone()">Select none</button>
     <button class="btn-warn btn-sm" onclick="reidentifyAll()" id="btn-reidentify">Re-identify all</button>
     <span id="sel-count"></span>
+  </div>
+  <div class="btn-row" style="margin-bottom:14px">
+    <input type="date" id="bulk-date" style="width:auto">
+    <button class="btn-outline btn-sm" onclick="applyDateToAll()">Set date for all (keeps time)</button>
   </div>
   <div id="grid"></div>
   <div style="height:1px;background:var(--border);margin:18px 0"></div>
@@ -447,6 +451,21 @@ async function reidentifyAll(){
     renderGrid();
   }
   btn.disabled=false; btn.textContent='Re-identify all';
+}
+
+// ── Bulk date override ────────────────────────────────
+async function applyDateToAll(){
+  if(!records.length)return;
+  const dateVal=document.getElementById('bulk-date').value;
+  if(!dateVal){alert('Pick a date first.');return;}
+  const resp=await fetch('/api/set_date_all',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({date:dateVal}),
+  });
+  const data=await resp.json();
+  if(data.error){alert(data.error);return;}
+  Object.entries(data.updated).forEach(([i,dt])=>{records[i].datetime=dt;});
+  renderGrid();
 }
 
 // ── Species suggest modal ─────────────────────────────
@@ -824,6 +843,7 @@ function resetAll(){
   document.getElementById('grid').innerHTML='';
   document.getElementById('file-label').textContent='📁 Choose photos or drag & drop';
   document.getElementById('photo-files').value='';
+  document.getElementById('bulk-date').value='';
   droppedFiles=null;
   hide('log-card'); hide('grid-card'); hide('result-card');
 }

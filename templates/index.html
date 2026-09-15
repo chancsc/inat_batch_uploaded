@@ -42,10 +42,10 @@
 
   /* Photo grid */
   #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;}
-  .obs-card{background:var(--surface);border:2px solid var(--border);border-radius:var(--radius);overflow:hidden;user-select:none;transition:border-color .15s,transform .1s;position:relative;}
+  .obs-card{background:var(--surface);border:2px solid var(--border);border-radius:var(--radius);overflow:hidden;transition:border-color .15s,transform .1s;position:relative;}
   .obs-card:hover{transform:translateY(-2px);}
   .obs-card.selected{border-color:var(--accent);}
-  .obs-card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#111;cursor:pointer;}
+  .obs-card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#111;cursor:pointer;user-select:none;}
   .obs-body{padding:9px;}
   .obs-file{font-size:.7rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .obs-species{font-size:.8rem;font-weight:600;margin:3px 0 2px;}
@@ -388,7 +388,8 @@ function cardHtml(rec,i){
     const sc=(sp.score!=null&&sp.score>=60)?'score-hi':'score-lo';
     const w=sp.low_confidence?' ⚠':'';
     const scoreStr=sp.score!=null?`cv: ${sp.score.toFixed(1)}%${w}`:'';
-    spHtml=`<div class="obs-species">${sp.common_name||sp.name||'—'}</div>
+    const inatLink=sp.taxon_id?`<a href="https://www.inaturalist.org/taxa/${sp.taxon_id}" target="_blank" rel="noopener" style="color:var(--accent);font-size:.7rem;text-decoration:none;margin-left:4px" title="View on iNaturalist" onclick="event.stopPropagation()">↗ iNat</a>`:'';
+    spHtml=`<div class="obs-species">${sp.common_name||sp.name||'—'}${inatLink}</div>
             <div class="obs-common">${sp.common_name?sp.name:''}</div>
             ${scoreStr?`<div class="obs-score ${sc}">${scoreStr}</div>`:''}`;
   }

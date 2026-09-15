@@ -389,7 +389,7 @@ function cardHtml(rec,i){
     const sc=(sp.score!=null&&sp.score>=60)?'score-hi':'score-lo';
     const w=sp.low_confidence?' ⚠':'';
     const scoreStr=sp.score!=null?`cv: ${sp.score.toFixed(1)}%${w}`:'';
-    const inatLink=sp.taxon_id?`<div style="margin-top:2px"><a href="https://www.inaturalist.org/taxa/${sp.taxon_id}" target="_blank" rel="noopener" style="color:var(--accent);font-size:.73rem;text-decoration:underline" title="View all observations on iNaturalist" onclick="event.stopPropagation()">View on iNat ↗</a></div>`:'';
+    const inatLink=sp.taxon_id?`<div style="margin-top:2px"><a href="https://www.inaturalist.org/observations?verifiable=true&taxon_id=${sp.taxon_id}&preferred_place_id=6734" target="_blank" rel="noopener" style="color:var(--accent);font-size:.73rem;text-decoration:underline" title="View all observations on iNaturalist" onclick="event.stopPropagation()">View on iNat ↗</a></div>`:'';
     spHtml=`<div class="obs-species">${sp.common_name||sp.name||'—'}</div>
             <div class="obs-common">${sp.common_name?sp.name:''}</div>
             ${scoreStr?`<div class="obs-score ${sc}">${scoreStr}</div>`:''}
